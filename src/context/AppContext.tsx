@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import {
   Vehicle,
   AIDiagnosisResult,
@@ -14,6 +14,19 @@ import {
   sampleServiceHistory,
   sampleMaintenancePredictions,
 } from '../data/mockData';
+import { checkSupabaseHealth } from '../lib/supabase';
+import {
+  apiFetchVehicles,
+  apiInsertVehicle,
+  apiFetchMechanics,
+  apiInsertDiagnosis,
+  apiFetchServiceRequests,
+  apiInsertServiceRequest,
+  apiUpdateServiceStages,
+  apiFetchServiceReports,
+  apiInsertServiceReport,
+  apiFetchMaintenancePredictions,
+} from '../services/api';
 
 interface AppContextType {
   currentView: string;
@@ -42,20 +55,26 @@ interface AppContextType {
   isChatOpen: boolean;
   setIsChatOpen: (open: boolean) => void;
   resetAllDemoData: () => void;
+  // Supabase Live Sync State
+  supabaseConnected: boolean;
+  supabaseLatency: number | null;
+  isSyncing: boolean;
+  refreshFromSupabase: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentView, setCurrentView] = useState<string>('landing');
+
   const [vehicles, setVehicles] = useState<Vehicle[]>(() => {
     const saved = localStorage.getItem('ai_mech_vehicles');
     return saved ? JSON.parse(saved) : sampleVehicles;
   });
   const [activeVehicle, setActiveVehicle] = useState<Vehicle>(() => vehicles[0] || sampleVehicles[0]);
-  const [mechanics] = useState<Mechanic[]>(sampleMechanics);
+  const [mechanics, setMechanics] = useState<Mechanic[]>(sampleMechanics);
 
-  const [activeDiagnosis, setActiveDiagnosis] = useState<AIDiagnosisResult | null>(() => {
+  const [activeDiagnosis, setActiveDiagnosisState] = useState<AIDiagnosisResult | null>(() => {
     const saved = localStorage.getItem('ai_mech_active_diag');
     return saved ? JSON.parse(saved) : null;
   });
@@ -80,7 +99,67 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
   const [isChatOpen, setIsChatOpen] = useState<boolean>(false);
 
-  // Persistence
+  // Supabase cloud connectivity
+  const [supabaseConnected, setSupabaseConnected] = useState<boolean>(false);
+  const [supabaseLatency, setSupabaseLatency] = useState<number | null>(null);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+
+  // Fetch and hydrate state from Supabase if tables exist
+  const refreshFromSupabase = useCallback(async () => {
+    setIsSyncing(true);
+    try {
+      const health = await checkSupabaseHealth();
+      setSupabaseConnected(health.ok);
+      setSupabaseLatency(health.latencyMs);
+
+      if (health.ok) {
+        // 1. Fetch Vehicles
+        const dbVehicles = await apiFetchVehicles();
+        if (dbVehicles && dbVehicles.length > 0) {
+          setVehicles(dbVehicles);
+          setActiveVehicle((prev) => dbVehicles.find((v) => v.id === prev.id) || dbVehicles[0]);
+        }
+
+        // 2. Fetch Mechanics
+        const dbMechanics = await apiFetchMechanics();
+        if (dbMechanics && dbMechanics.length > 0) {
+          setMechanics(dbMechanics);
+        }
+
+        // 3. Fetch Service Requests
+        const dbRequests = await apiFetchServiceRequests();
+        if (dbRequests && dbRequests.length > 0) {
+          setServiceRequests(dbRequests);
+          setActiveServiceRequestId((prev) =>
+            dbRequests.some((r) => r.id === prev) ? prev : dbRequests[0].id
+          );
+        }
+
+        // 4. Fetch Service Reports
+        const dbReports = await apiFetchServiceReports();
+        if (dbReports && dbReports.length > 0) {
+          setServiceReports(dbReports);
+        }
+
+        // 5. Fetch Maintenance Predictions
+        const dbPredictions = await apiFetchMaintenancePredictions();
+        if (dbPredictions && dbPredictions.length > 0) {
+          setMaintenancePredictions(dbPredictions);
+        }
+      }
+    } catch (err) {
+      console.warn('Error hydrating state from Supabase:', err);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, []);
+
+  // Hydrate on mount
+  useEffect(() => {
+    refreshFromSupabase();
+  }, [refreshFromSupabase]);
+
+  // Local Persistence
   useEffect(() => {
     localStorage.setItem('ai_mech_vehicles', JSON.stringify(vehicles));
   }, [vehicles]);
@@ -102,6 +181,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const activeServiceRequest =
     serviceRequests.find((r) => r.id === activeServiceRequestId) || serviceRequests[0] || null;
 
+  const setActiveDiagnosis = (d: AIDiagnosisResult | null) => {
+    setActiveDiagnosisState(d);
+    if (d) {
+      apiInsertDiagnosis(d).catch((e) =>
+        console.warn('Async Supabase insert diagnosis failed:', e)
+      );
+    }
+  };
+
   const addVehicle = (newVeh: Omit<Vehicle, 'id'>) => {
     const vehicle: Vehicle = {
       ...newVeh,
@@ -110,6 +198,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const updated = [vehicle, ...vehicles];
     setVehicles(updated);
     setActiveVehicle(vehicle);
+
+    // Asynchronously insert into Supabase
+    apiInsertVehicle(vehicle).catch((e) =>
+      console.warn('Async Supabase insert vehicle failed:', e)
+    );
   };
 
   const createServiceRequest = (
@@ -186,6 +279,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const updated = [newRequest, ...serviceRequests];
     setServiceRequests(updated);
     setActiveServiceRequestId(newId);
+
+    // Asynchronously insert into Supabase
+    apiInsertServiceRequest(newRequest).catch((e) =>
+      console.warn('Async Supabase insert service request failed:', e)
+    );
+
     return newRequest;
   };
 
@@ -215,6 +314,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         });
 
+        // Persist stage progress to Supabase
+        apiUpdateServiceStages(requestId, nextIndex, updatedStages).catch((e) =>
+          console.warn('Async Supabase update stage failed:', e)
+        );
+
         // If reaching final stage (Ready for Pickup), ensure a final report is generated in history
         if (nextIndex === req.stages.length - 1 && req.actualBill) {
           const mech = mechanics.find((m) => m.id === req.mechanicId) || mechanics[0];
@@ -242,6 +346,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               invoiceNumber: `INV-${mech.name.substring(0, 3).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`,
             };
             setServiceReports((rPrev) => [newReport, ...rPrev]);
+
+            // Persist report to Supabase
+            apiInsertServiceReport(newReport).catch((e) =>
+              console.warn('Async Supabase insert service report failed:', e)
+            );
           }
         }
 
@@ -263,6 +372,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           status: idx === 0 ? ('completed' as const) : idx === 1 ? ('current' as const) : ('pending' as const),
           timestamp: idx === 0 ? 'Today, 10:15 AM' : undefined,
         }));
+        // Update Supabase
+        apiUpdateServiceStages(requestId, 1, resetStages).catch((e) =>
+          console.warn('Async Supabase reset stage failed:', e)
+        );
         return {
           ...req,
           currentStageIndex: 1,
@@ -279,7 +392,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.removeItem('ai_mech_reports');
     setVehicles(sampleVehicles);
     setActiveVehicle(sampleVehicles[0]);
-    setActiveDiagnosis(null);
+    setActiveDiagnosisState(null);
     setServiceRequests([initialActiveServiceRequest]);
     setActiveServiceRequestId(initialActiveServiceRequest.id);
     setServiceReports(sampleServiceHistory);
@@ -312,6 +425,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isChatOpen,
         setIsChatOpen,
         resetAllDemoData,
+        supabaseConnected,
+        supabaseLatency,
+        isSyncing,
+        refreshFromSupabase,
       }}
     >
       {children}

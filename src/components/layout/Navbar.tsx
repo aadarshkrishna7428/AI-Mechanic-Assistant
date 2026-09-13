@@ -2,18 +2,14 @@ import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
   Wrench,
-  Cpu,
   Car,
-  History,
-  Activity,
   Menu,
   X,
   Sparkles,
   ChevronDown,
   RotateCcw,
-  User,
   Radio,
-  Clock,
+  Database,
 } from 'lucide-react';
 import { currentUser } from '../../data/mockData';
 
@@ -23,7 +19,16 @@ interface NavbarProps {
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ onOpenVehicleModal, onOpenProfileModal }) => {
-  const { currentView, setCurrentView, activeVehicle, activeServiceRequest, resetAllDemoData } = useApp();
+  const {
+    currentView,
+    setCurrentView,
+    activeVehicle,
+    activeServiceRequest,
+    resetAllDemoData,
+    supabaseConnected,
+    supabaseLatency,
+    isSyncing,
+  } = useApp();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [resetConfirm, setResetConfirm] = useState(false);
 
@@ -35,7 +40,11 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenVehicleModal, onOpenProfil
     {
       id: 'tracking',
       label: 'Live Tracking',
-      badge: activeServiceRequest?.currentStageIndex !== undefined && activeServiceRequest.currentStageIndex < 5 ? 'Live' : undefined,
+      badge:
+        activeServiceRequest?.currentStageIndex !== undefined &&
+        activeServiceRequest.currentStageIndex < 5
+          ? 'Live'
+          : undefined,
     },
     { id: 'history', label: 'Service History' },
     { id: 'maintenance', label: 'Smart Maintenance' },
@@ -115,6 +124,41 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenVehicleModal, onOpenProfil
 
           {/* Right Action Bar */}
           <div className="hidden md:flex items-center gap-2.5">
+            {/* Supabase Connection Status Badge */}
+            <div
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-all ${
+                supabaseConnected
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                  : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+              }`}
+              title={
+                supabaseConnected
+                  ? `Connected to Supabase (${supabaseLatency ?? 0}ms latency)`
+                  : 'Connecting to Supabase...'
+              }
+            >
+              <Database className="w-3.5 h-3.5" />
+              <span className="relative flex h-2 w-2">
+                <span
+                  className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                    supabaseConnected ? 'bg-emerald-400' : 'bg-amber-400'
+                  }`}
+                ></span>
+                <span
+                  className={`relative inline-flex rounded-full h-2 w-2 ${
+                    supabaseConnected ? 'bg-emerald-500' : 'bg-amber-500'
+                  }`}
+                ></span>
+              </span>
+              <span className="font-mono text-[10px] hidden xl:inline">
+                {isSyncing
+                  ? 'Syncing...'
+                  : supabaseConnected
+                  ? `Supabase Live (${supabaseLatency ?? 0}ms)`
+                  : 'Supabase Connecting'}
+              </span>
+            </div>
+
             {/* Active Vehicle Switcher Pill */}
             <button
               onClick={onOpenVehicleModal}
@@ -137,7 +181,9 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenVehicleModal, onOpenProfil
               className="p-2 rounded-lg bg-slate-800/50 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700/50 text-xs transition-all"
               title="Reset Demo Data to Initial State"
             >
-              <RotateCcw className={`w-3.5 h-3.5 ${resetConfirm ? 'text-emerald-400 animate-spin' : ''}`} />
+              <RotateCcw
+                className={`w-3.5 h-3.5 ${resetConfirm ? 'text-emerald-400 animate-spin' : ''}`}
+              />
             </button>
 
             {/* Profile Avatar Button */}
@@ -165,11 +211,19 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenVehicleModal, onOpenProfil
 
           {/* Mobile Menu Button */}
           <div className="flex md:hidden items-center gap-2">
+            {/* Mobile Supabase Indicator */}
+            <span
+              className={`w-2 h-2 rounded-full ${
+                supabaseConnected ? 'bg-emerald-500' : 'bg-amber-500'
+              }`}
+              title={supabaseConnected ? 'Supabase Connected' : 'Connecting'}
+            />
+
             <button
               onClick={onOpenVehicleModal}
               className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-xs text-slate-300"
             >
-              <Car className="w-3 h-3 text-cyan-400" />
+              <Car className="w-3.5 h-3.5 text-cyan-400" />
               <span className="max-w-[80px] truncate">{activeVehicle.model}</span>
             </button>
 
@@ -225,6 +279,26 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenVehicleModal, onOpenProfil
                 )}
               </button>
             ))}
+          </div>
+
+          {/* Mobile Supabase Connection Info */}
+          <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-900/60 border border-slate-800 text-xs">
+            <span className="flex items-center gap-1.5 text-slate-300">
+              <Database className="w-3.5 h-3.5 text-cyan-400" />
+              Supabase Status
+            </span>
+            <span
+              className={`font-semibold flex items-center gap-1 text-[11px] ${
+                supabaseConnected ? 'text-emerald-400' : 'text-amber-400'
+              }`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  supabaseConnected ? 'bg-emerald-500' : 'bg-amber-500'
+                }`}
+              />
+              {supabaseConnected ? `Connected (${supabaseLatency}ms)` : 'Connecting'}
+            </span>
           </div>
 
           <div className="pt-2">

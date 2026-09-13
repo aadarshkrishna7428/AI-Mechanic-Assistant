@@ -1,17 +1,10 @@
 import React, { useState } from 'react';
-import { Mechanic, Vehicle, AIDiagnosisResult } from '../../types';
+import { Mechanic, AIDiagnosisResult } from '../../types';
 import { useApp } from '../../context/AppContext';
 import {
   X,
   Wrench,
-  Car,
-  Calendar,
-  Clock,
-  DollarSign,
   ShieldCheck,
-  CheckCircle2,
-  Sparkles,
-  MapPin,
   ChevronRight,
 } from 'lucide-react';
 
@@ -82,7 +75,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
       createdAt: 'Just now',
     };
 
-    const newReq = createServiceRequest(diagnosisToUse, mechanic.id, serviceType);
+    createServiceRequest(diagnosisToUse, mechanic.id, serviceType);
     onClose();
     setCurrentView('tracking');
     window.scrollTo({ top: 0, behavior: 'smooth' });
